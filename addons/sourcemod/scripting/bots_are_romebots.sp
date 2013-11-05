@@ -47,7 +47,7 @@ public OnPluginStart()
 	g_hEquipWearable = EndPrepSDKCall();
 	
 	CreateConVar("botsareromebots_version", VERSION, "Bots are Romebots version", FCVAR_NOTIFY|FCVAR_DONTRECORD|FCVAR_PLUGIN|FCVAR_SPONLY);
-	g_Cvar_Enabled = CreateConVar("botsarerobots_enabled", "1.0", "Bots are Romebots is enabled", FCVAR_NOTIFY|FCVAR_DONTRECORD, true, 0.0, true, 1.0);
+	g_Cvar_Enabled = CreateConVar("botsareromebots_enabled", "1.0", "Bots are Romebots is enabled", FCVAR_NOTIFY|FCVAR_DONTRECORD, true, 0.0, true, 1.0);
 	
 	HookEvent("player_spawn", Event_Player_Spawn);
 	AddNormalSoundHook(RobotSoundHook);
