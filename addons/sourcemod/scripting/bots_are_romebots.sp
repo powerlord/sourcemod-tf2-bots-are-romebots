@@ -3,10 +3,16 @@
 #include <tf2>
 #include <tf2_stocks>
 #include <readgamesounds>
+#include <tf2attributes>
+#include <sdkhooks>
 
 #define VERSION "1.0"
 
 #define MODEL_PATH "models/bots/"
+
+#define PYROVISION (1<<0)
+#define HALLOWEENVISION (1<<1)
+#define ROMEVISION (1<<2)
 
 new Handle:g_hGameConf;
 new Handle:g_hEquipWearable;
@@ -49,7 +55,9 @@ public OnPluginStart()
 	CreateConVar("botsareromebots_version", VERSION, "Bots are Romebots version", FCVAR_NOTIFY|FCVAR_DONTRECORD|FCVAR_PLUGIN|FCVAR_SPONLY);
 	g_Cvar_Enabled = CreateConVar("botsareromebots_enabled", "1.0", "Bots are Romebots is enabled", FCVAR_NOTIFY|FCVAR_DONTRECORD, true, 0.0, true, 1.0);
 	
-	HookEvent("player_spawn", Event_Player_Spawn);
+//	HookEvent("player_spawn", Event_Player_Spawn);
+	HookEvent("post_inventory_application", Event_Post_Inventory_Application);
+	
 	AddNormalSoundHook(RobotSoundHook);
 }
 
@@ -84,6 +92,11 @@ public OnConfigsExecuted()
 			}
 		}
 	}
+}
+
+public OnClientPutInServer(client)
+{
+	SDKHook(client, SDKHook_OnTakeDamage, Hook_TakeDamage);
 }
 
 public OnClientDisconnect(client)
@@ -123,7 +136,8 @@ SetRobotBotCosmetics(client, TFClassType:class)
 	}
 }
 
-public Event_Player_Spawn(Handle:event, const String:name[], bool:dontBroadcast)
+//public Event_Player_Spawn(Handle:event, const String:name[], bool:dontBroadcast)
+public Event_Post_Inventory_Application(Handle:event, const String:name[], bool:dontBroadcast)
 {
 	if (!GetConVarBool(g_Cvar_Enabled))
 	{
@@ -131,15 +145,53 @@ public Event_Player_Spawn(Handle:event, const String:name[], bool:dontBroadcast)
 	}
 	
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
-	new TFClassType:class = TFClassType:GetEventInt(event, "class");
 	
-	if (IsClientInGame(client) && IsFakeClient(client) && class != TFClass_Unknown)
+	if (client == 0 || !IsClientInGame(client) || IsClientReplay(client) || IsClientSourceTV(client))
+	{
+		return;
+	}
+	
+	//new TFClassType:class = TFClassType:GetEventInt(event, "class");
+	new TFClassType:class = TF2_GetPlayerClass(client);
+	
+	if (class == TFClass_Unknown)
+	{
+		return;
+	}
+	
+	if (IsFakeClient(client))
 	{
 		SetRobotModel(client, class);
 		SetRobotBotCosmetics(client, class);
 	}
+	else
+	{
+		new visionFlags = 0;
+		new Address:visionAddress = TF2Attrib_GetByName(client, "vision opt in flags");
+		if (visionAddress != Address_Null)
+		{
+			visionFlags = RoundFloat(TF2Attrib_GetValue(visionAddress));
+		}
+		visionFlags |= ROMEVISION;
+		TF2Attrib_SetByName(client, "vision opt in flags", float(visionFlags));
+	}
 }
 
+public Action:Hook_TakeDamage(victim, &attacker, &inflictor, &Float:damage, &damagetype, &weapon,
+		Float:damageForce[3], Float:damagePosition[3], damagecustom)
+{
+	if (!GetConVarBool(g_Cvar_Enabled) || victim < 1 || victim > MaxClients || !g_bPlayerIsRobot[victim])
+	{
+		return Plugin_Continue;
+	}
+	
+	if (damage > 0)
+	{
+		EmitGameSoundToAll("MVM_Robot.BulletImpact", victim);
+	}
+	return Plugin_Continue;
+}
+		
 public Action:RobotSoundHook(clients[64], &numClients, String:sample[PLATFORM_MAX_PATH], &entity, &channel, &Float:volume, &level, &pitch, &flags)
 {
 	if (!GetConVarBool(g_Cvar_Enabled) || entity <= 0 || entity > MaxClients || !g_bPlayerIsRobot[entity])
@@ -155,12 +207,20 @@ public Action:RobotSoundHook(clients[64], &numClients, String:sample[PLATFORM_MA
 	}
 	else if (StrContains(sample, "footsteps/", false) != -1)
 	{
-		if (TF2_GetPlayerClass(entity) != TFClass_Medic && GetGameSoundParams("MVM.BotStep", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		if (GetGameSoundParams("MVM.BotStep", channel, level, volume, pitch, sample, sizeof(sample), entity))
 		{
-			PrecacheSound(sample);
-			return Plugin_Changed;
+			if (TF2_GetPlayerClass(entity) == TFClass_Medic)
+			{
+				return Plugin_Stop;
+			}
+			else
+			{
+				PrecacheSound(sample);
+				return Plugin_Changed;
+			}
 		}
 	}
+	// Fall damage
 	else if (StrContains(sample, "player/pl_fallpain", false) != -1)
 	{
 		if (GetGameSoundParams("MVM.FallDamageBots", channel, level, volume, pitch, sample, sizeof(sample), entity))
@@ -169,6 +229,166 @@ public Action:RobotSoundHook(clients[64], &numClients, String:sample[PLATFORM_MA
 			return Plugin_Changed;
 		}
 	}
-	
+	// Pyro Axes
+	else if (StrContains(sample, "weapons/axe_hit_flesh", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_FireAxe.HitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	// Third degree
+	else if (StrContains(sample, "weapons\3rd_degree_hit_0", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_3rd_degree.HitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	// Sandman
+	else if (StrContains(sample, "weapons/bat_baseball_hit_flesh", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_BaseballBat.HitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	// Spy knives
+	else if (StrContains(sample, "weapons/blade_hit", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_Knife.HitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	// Equalizer, Swords
+	else if (StrContains(sample, "weapons/blade_slice_", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_PickAxe.HitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	// Bottle
+	else if (StrContains(sample, "weapons/bottle_hit_flesh", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_Bottle.HitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}	
+	else if (StrContains(sample, "weapons/bottle_intact_hit_flesh", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_Bottle.IntactHitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	else if (StrContains(sample, "weapons/bottle_broken_hit_flesh", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_Bottle.BrokenHitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	// Generic melee (Kukri, Fist, Bonesaw, Wrench)
+	else if (StrContains(sample, "weapons/cbar_hitbod", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_Crowbar.HitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	// Stock bat
+	else if (StrContains(sample, "weapons/bat_hit", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_Bat.HitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	//Eviction Notice
+	else if (StrContains(sample, "weapons\eviction_notice_0", false) != -1)
+	{
+		if (StrContains(sample, "crit", false) != -1)
+		{
+			if (GetGameSoundParams("MVM_EvictionNotice.ImpactCrit", channel, level, volume, pitch, sample, sizeof(sample), entity))
+			{
+				PrecacheSound(sample);
+				return Plugin_Changed;
+			}
+		}
+		else
+		{
+			if (GetGameSoundParams("MVM_EvictionNotice.Impact", channel, level, volume, pitch, sample, sizeof(sample), entity))
+			{
+				PrecacheSound(sample);
+				return Plugin_Changed;
+			}
+		}
+	}
+	// Fists of Steel
+	else if (StrContains(sample, "weapons/metal_gloves_hit_flesh", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_MetalGloves.HitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	else if (StrContains(sample, "weapons/metal_gloves_hit_crit", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_MetalGloves.CritHit", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	//Sharp Dresser
+	else if (StrContains(sample, "weapons\\spy_assassin_knife_impact_", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_Assassin_Knife.HitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	else if (StrContains(sample, "weapons\\spy_assassin_knife_bckstb", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_Assassin_Knife.Backstab", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	// Huntsman / Crusader's Crossbow arrows
+	else if (StrContains(sample, "weapons/fx/rics/arrow_impact_flesh", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_Weapon_Arrow.ImpactFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+	// Frying Pan
+	else if (StrContains(sample, "weapons/pan/melee_frying_pan", false) != -1)
+	{
+		if (GetGameSoundParams("MVM_FryingPan.HitFlesh", channel, level, volume, pitch, sample, sizeof(sample), entity))
+		{
+			PrecacheSound(sample);
+			return Plugin_Changed;
+		}
+	}
+
 	return Plugin_Continue;
 }
