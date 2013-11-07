@@ -185,7 +185,7 @@ public Action:Hook_TakeDamage(victim, &attacker, &inflictor, &Float:damage, &dam
 		return Plugin_Continue;
 	}
 	
-	if (damage > 0)
+	if (damagetype & DMG_BULLET && damage > 0)
 	{
 		EmitGameSoundToAll("MVM_Robot.BulletImpact", victim);
 	}
